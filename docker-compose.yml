@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bms
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrator:
+    build: .
+    command: ["/app/migrator"]
+    environment:
+      CONFIG_PATH: /app/config/local.yaml
+      POSTGRES_DSN: "postgres://postgres:postgres@postgres:5432/bms?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      CONFIG_PATH: /app/config/local.yaml
+      POSTGRES_DSN: "postgres://postgres:postgres@postgres:5432/bms?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:

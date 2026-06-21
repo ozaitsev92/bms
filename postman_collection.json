@@ -1,0 +1,338 @@
+{
+  "info": {
+    "name": "BMS API",
+    "description": "Postman collection for the Building Management System API (Fiber + PostgreSQL).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "building_id",
+      "value": "1"
+    },
+    {
+      "key": "apartment_id",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Buildings",
+      "item": [
+        {
+          "name": "Get All Buildings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/buildings?with_apartments=false",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "buildings"
+              ],
+              "query": [
+                {
+                  "key": "with_apartments",
+                  "value": "false",
+                  "description": "Set to true to include apartments in each building"
+                }
+              ]
+            },
+            "description": "List buildings. Toggle with_apartments=true to preload apartments."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Building By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/buildings/{{building_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "buildings",
+                "{{building_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert Building (Create)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  if (json && json.id) {",
+                  "    pm.collectionVariables.set('building_id', String(json.id));",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Tower A\",\n  \"address\": \"123 Main St\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/buildings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "buildings"
+              ]
+            },
+            "description": "Create a building (returns 201) and saves id to {{building_id}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert Building (Update)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var json = pm.response.json();",
+                  "  if (json && json.id) {",
+                  "    pm.collectionVariables.set('building_id', String(json.id));",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{building_id}},\n  \"name\": \"Tower A\",\n  \"address\": \"123 Updated Main St\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/buildings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "buildings"
+              ]
+            },
+            "description": "Update existing building by sending id in payload (returns 200)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Building",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/buildings/{{building_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "buildings",
+                "{{building_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Apartments",
+      "item": [
+        {
+          "name": "Get All Apartments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/apartments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "apartments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Apartment By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/apartments/{{apartment_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "apartments",
+                "{{apartment_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Apartments By Building",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/apartments/building/{{building_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "apartments",
+                "building",
+                "{{building_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert Apartment (Create)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  if (json && json.id) {",
+                  "    pm.collectionVariables.set('apartment_id', String(json.id));",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"building_id\": {{building_id}},\n  \"number\": \"101\",\n  \"floor\": 1,\n  \"sq_meters\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/apartments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "apartments"
+              ]
+            },
+            "description": "Create apartment (returns 201) and saves id to {{apartment_id}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert Apartment (Update)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var json = pm.response.json();",
+                  "  if (json && json.id) {",
+                  "    pm.collectionVariables.set('apartment_id', String(json.id));",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{apartment_id}},\n  \"building_id\": {{building_id}},\n  \"number\": \"101\",\n  \"floor\": 2,\n  \"sq_meters\": 60\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/apartments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "apartments"
+              ]
+            },
+            "description": "Update existing apartment by sending id in payload (returns 200)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Apartment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/apartments/{{apartment_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "apartments",
+                "{{apartment_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
