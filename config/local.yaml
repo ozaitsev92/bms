@@ -1,0 +1,13 @@
+env: "local"
+
+http_server:
+  address: ":8080"
+  timeout: 4s
+  idle_timeout: 60s
+  read_timeout: 10s
+  write_timeout: 10s
+  graceful_shutdown_timeout: 10s
+
+postgres:
+  dsn: "postgres://postgres:postgres@postgres:5432/bms?sslmode=disable"
+  migrations_table: "schema_migrations"

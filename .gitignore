@@ -1,0 +1,53 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+*.out
+*.test
+
+# Project binaries
+/deviceprofile
+/migrator
+/bin/
+/dist/
+
+# Go tooling
+coverage.out
+coverage.txt
+cover.out
+*.coverprofile
+*.prof
+*.pprof
+
+# Dependency/vendor (enable only if you vendor)
+/vendor/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs and runtime files
+*.log
+*.pid
+*.seed
+*.stackdump
+
+# Temporary files
+/tmp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
