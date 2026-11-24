@@ -53,7 +53,7 @@ func runWithPostgres(m *testing.M) (int, error) {
 	ctx := context.Background()
 
 	container, err := tcpostgres.Run(ctx,
-		"postgres:17-alpine",
+		"postgres:19-alpine",
 		tcpostgres.WithDatabase("bms_test"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),

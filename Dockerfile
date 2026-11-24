@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25.8-alpine3.22 AS builder
+FROM golang:1.27.4-alpine3.24 AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -17,7 +17,7 @@ COPY models ./models
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/migrator ./cmd/migrator
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN addgroup -S app && adduser -S -G app -H app
 

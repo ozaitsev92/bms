@@ -4,10 +4,10 @@ REST API for managing buildings and apartments.
 
 ## Stack
 
-- Go 1.25
+- Go 1.27
 - Fiber (HTTP)
 - SQLBoiler (ORM, generated models in `models/`)
-- PostgreSQL
+- PostgreSQL 19
 - golang-migrate (schema migrations)
 - Testcontainers (repository integration tests)
 
@@ -100,7 +100,7 @@ Create/Upsert apartment:
 
 ## Run Locally
 
-Prerequisites: Docker (with Compose v2), Go 1.25+
+Prerequisites: Docker (with Compose v2), Go 1.27+
 
 Start the full stack (Postgres, then migrator, then API):
 ```bash
@@ -150,7 +150,7 @@ make lint        # golangci-lint (config in .golangci.yml)
 make vuln        # govulncheck
 ```
 
-The repository tests in `internal/adapter/postgres` start one Postgres 17 container per test run (Testcontainers). They apply the real migrations through golang-migrate and truncate the tables before each test. They are skipped with `-short`.
+The repository tests in `internal/adapter/postgres` start one Postgres 19 container per test run (Testcontainers). They apply the real migrations through golang-migrate and truncate the tables before each test. They are skipped with `-short`.
 
 ## Postman
 
