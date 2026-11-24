@@ -6,7 +6,7 @@ REST API for managing buildings and apartments.
 
 - Go 1.25
 - Fiber (HTTP)
-- SQLBoiler (ORM)
+- SQLBoiler (ORM, generated models in `models/`)
 - PostgreSQL
 - golang-migrate (schema migrations)
 - Testcontainers (repository integration tests)
@@ -17,36 +17,66 @@ REST API for managing buildings and apartments.
 - id: serial primary key
 - name: unique, required
 - address: required
+- created_at, updated_at: timestamptz
 
 ### apartment
 - id: serial primary key
 - building_id: foreign key to building.id (ON DELETE CASCADE)
 - number: required
-- floor: required
-- sq_meters: required
+- floor: required, any integer (0 = ground floor, negative = basement)
+- sq_meters: required, > 0 (CHECK constraint)
 - unique constraint: (building_id, number)
+- created_at, updated_at: timestamptz
 
 ## API
 
 Base URL: http://localhost:8080
 
 ### Buildings
-- GET /buildings
-  - Optional query param: with_apartments=true|false
-- GET /buildings/{id}
-- POST /buildings
-  - Upsert semantics
-  - Returns 201 when created, 200 when request body includes id and updates
-- DELETE /buildings/{id}
+- `GET /buildings`: paginated list, optional `with_apartments=true|false`
+- `GET /buildings/{id}`: includes the building's apartments
+- `GET /buildings/{id}/apartments`: paginated, 404 if the building does not exist
+- `POST /buildings`: upsert (see below)
+- `DELETE /buildings/{id}`: 204, also deletes its apartments
 
 ### Apartments
-- GET /apartments
-- GET /apartments/{id}
-- GET /apartments/building/{buildingId}
-- POST /apartments
-  - Upsert semantics
-  - Returns 201 when created, 200 when request body includes id and updates
-- DELETE /apartments/{id}
+- `GET /apartments`: paginated list
+- `GET /apartments/{id}`
+- `GET /apartments/building/{buildingId}`: alias of `GET /buildings/{id}/apartments`
+- `POST /apartments`: upsert (see below)
+- `DELETE /apartments/{id}`: 204
+
+### Operations
+- `GET /healthz`: liveness, always 204
+- `GET /readyz`: readiness, 204 if the database answers a ping within 1s, otherwise 503
+
+### Upsert semantics
+`POST` creates or updates, and the status code reports what actually happened:
+
+| Request body | Behaviour | Status |
+|---|---|---|
+| no `id`, new natural key | inserts | `201` + `Location` header |
+| no `id`, existing natural key (building `name`, apartment `building_id`+`number`) | updates that row | `200` |
+| with `id` of an existing row | updates it | `200` |
+| with `id` that does not exist | nothing is written | `404` |
+
+Clients can never choose primary keys: an `id` is only used to find an existing row.
+
+### Pagination
+List endpoints use keyset pagination ordered by `id`: `?limit=` (1–200, default 50) and `?after_id=` (the last `id` of the previous page). The response is a JSON array.
+
+### Errors
+Every error has the shape `{"error": "...", "details": ["..."]}`. `details` is present only for validation errors and lists every violation.
+
+| Status | Meaning |
+|---|---|
+| 400 | malformed JSON, unknown field, invalid path id or query parameter |
+| 404 | resource not found |
+| 409 | unique key already taken (for example, renaming a building to an existing name) |
+| 413 | body larger than `http_server.body_limit_bytes` (default 1 MiB) |
+| 415 | `Content-Type` is not `application/json` |
+| 422 | validation failed, or `building_id` refers to a building that does not exist |
+| 500 / 503 | internal error / dependency unavailable or request timed out. The cause is logged with the request id, not returned. |
 
 ### Example Payloads
 
@@ -70,41 +100,57 @@ Create/Upsert apartment:
 
 ## Run Locally
 
-Prerequisites: Docker, Docker Compose, Go 1.25+
+Prerequisites: Docker (with Compose v2), Go 1.25+
 
-Start full stack (Postgres + migrator + API):
+Start the full stack (Postgres, then migrator, then API):
 ```bash
 make run
 ```
 
-Stop stack:
+Stop the stack:
 ```bash
 make stop
 ```
 
+## Configuration
+
+The YAML file is passed with `--config` or `CONFIG_PATH` (see `config/local.yaml`). Environment variables override the file:
+
+| Variable | Overrides |
+|---|---|
+| `APP_ENV` | `env` (`local` = text logs, debug level; `prod` = JSON logs, info level) |
+| `HTTP_ADDRESS` | `http_server.address` |
+| `POSTGRES_DSN` | `postgres.dsn` |
+| `MIGRATIONS_PATH` | `postgres.migrations_path` |
+
+The configuration is validated at startup and the process exits with a clear error if anything is invalid. HTTP read/write/idle timeouts, a per-request deadline (`request_timeout`), the body limit, the DB pool size and the graceful-shutdown timeout are all applied from it.
+
 ## Migrations and Models
 
-Apply migrations manually:
+Run migrations from the host against the compose database (after `make run`):
 ```bash
-make migrate
+make migrate           # apply all pending
+make migrate-down      # roll back one step
+make migrate-version   # print current version
 ```
+The migrator binary also accepts `force N` to clear a dirty state after a failed migration has been repaired by hand.
 
-Regenerate SQLBoiler models:
+Regenerate SQLBoiler models (pinned sqlboiler version, installed into `./bin`; needs a migrated database on `localhost:5432`):
 ```bash
 make generate
 ```
 
 ## Testing
 
-Run project tests:
 ```bash
-make test
+make test        # all tests, including Postgres integration tests (requires Docker)
+make test-unit   # unit tests only (-short, no Docker)
+make cover       # HTML coverage report
+make lint        # golangci-lint (config in .golangci.yml)
+make vuln        # govulncheck
 ```
 
-Generate HTML coverage report:
-```bash
-make cover
-```
+The repository tests in `internal/adapter/postgres` start one Postgres 17 container per test run (Testcontainers). They apply the real migrations through golang-migrate and truncate the tables before each test. They are skipped with `-short`.
 
 ## Postman
 
@@ -123,7 +169,7 @@ How to use:
 
 ```text
 cmd/
-  api/            # HTTP server entrypoint
+  api/            # HTTP server entrypoint (composition root)
   migrator/       # DB migration entrypoint
 config/
   local.yaml      # local configuration
@@ -132,15 +178,18 @@ db/
   sqlboiler.toml  # SQLBoiler configuration
 internal/
   adapter/
-    http/         # Fiber handlers and routing
+    httpapi/      # Fiber server, middleware, handlers, DTOs, error mapping
     postgres/     # Repository implementations
-  app/            # Use-case/services
-  domain/         # Core entities
-  port/           # Repository interfaces
-models/           # SQLBoiler generated models
+  app/            # Use cases / services
+  domain/         # Entities, invariants, domain errors
+  port/           # Repository interfaces and their error contract
+models/           # SQLBoiler generated models (do not edit)
 ```
 
-## Notes
+## Design decisions
 
-- No authentication middleware is configured in the current API.
-- Configuration is loaded from CONFIG_PATH (or --config), with POSTGRES_DSN override support.
+- **Hexagonal layering.** `domain` imports nothing. `port` declares the repository interfaces *and* their error contract (`domain.ErrNotFound`, `ErrConflict`, `ErrInvalidReference`). Adapters translate driver errors at the boundary, so `app` never sees `database/sql`.
+- **One error-to-status mapping.** Handlers return errors and `httpapi.ErrorHandler` maps them. 5xx causes are logged with the request id; clients get stable messages.
+- **Upsert by natural key** is kept because the API contract requires it. The insert-vs-update outcome comes from Postgres (`RETURNING (xmax = 0)`), and updates by id never insert.
+- **Hand-written SQL for upserts.** sqlboiler is used for reads and deletes; the two upserts are explicit parameterised statements, because sqlboiler cannot report whether a row was inserted.
+- **No authentication** is configured. That is out of scope for this exercise.

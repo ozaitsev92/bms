@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/ozaitsev92/bms/internal/domain"
@@ -20,11 +18,11 @@ func NewApartmentService(repo port.ApartmentRepository) *ApartmentService {
 	return &ApartmentService{repo: repo}
 }
 
-// GetAll returns all apartments.
-func (s *ApartmentService) GetAll(ctx context.Context) ([]domain.Apartment, error) {
-	apartments, err := s.repo.FindAll(ctx)
+// List returns a page of apartments.
+func (s *ApartmentService) List(ctx context.Context, p port.ListParams) ([]domain.Apartment, error) {
+	apartments, err := s.repo.FindAll(ctx, p)
 	if err != nil {
-		return nil, fmt.Errorf("get all apartments: %w", err)
+		return nil, fmt.Errorf("list apartments: %w", err)
 	}
 
 	return apartments, nil
@@ -34,59 +32,40 @@ func (s *ApartmentService) GetAll(ctx context.Context) ([]domain.Apartment, erro
 func (s *ApartmentService) GetByID(ctx context.Context, id int) (*domain.Apartment, error) {
 	apartment, err := s.repo.FindByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("get apartment by id %d: %w", id, ErrNotFound)
-		}
-
-		return nil, fmt.Errorf("get apartment by id %d: %w", id, err)
+		return nil, fmt.Errorf("get apartment %d: %w", id, err)
 	}
 
 	return apartment, nil
 }
 
-// GetByBuildingID returns apartments for a building.
-func (s *ApartmentService) GetByBuildingID(ctx context.Context, buildingID int) ([]domain.Apartment, error) {
-	apartments, err := s.repo.FindByBuildingID(ctx, buildingID)
+// ListByBuilding returns a page of apartments of an existing building.
+func (s *ApartmentService) ListByBuilding(ctx context.Context, buildingID int, p port.ListParams) ([]domain.Apartment, error) {
+	apartments, err := s.repo.FindByBuildingID(ctx, buildingID, p)
 	if err != nil {
-		return nil, fmt.Errorf("get apartments by building id %d: %w", buildingID, err)
+		return nil, fmt.Errorf("list apartments of building %d: %w", buildingID, err)
 	}
 
 	return apartments, nil
 }
 
-// Upsert validates and creates or updates an apartment.
-func (s *ApartmentService) Upsert(ctx context.Context, a domain.Apartment) (*domain.Apartment, error) {
-	if a.BuildingID == 0 {
-		return nil, ErrMissingBuildingID
+// Upsert validates and creates or updates an apartment. created reports
+// whether a new apartment was inserted.
+func (s *ApartmentService) Upsert(ctx context.Context, a domain.Apartment) (*domain.Apartment, bool, error) {
+	if err := a.Validate(); err != nil {
+		return nil, false, err
 	}
 
-	if a.Number == "" {
-		return nil, ErrMissingApartmentNumber
-	}
-
-	if a.Floor == 0 {
-		return nil, ErrInvalidFloor
-	}
-
-	if a.SqMeters <= 0 {
-		return nil, ErrInvalidSqMeters
-	}
-
-	apartment, err := s.repo.Upsert(ctx, a)
+	apartment, created, err := s.repo.Upsert(ctx, a)
 	if err != nil {
-		return nil, fmt.Errorf("upsert apartment: %w", err)
+		return nil, false, fmt.Errorf("upsert apartment: %w", err)
 	}
 
-	return apartment, nil
+	return apartment, created, nil
 }
 
 // Delete removes an apartment by ID.
 func (s *ApartmentService) Delete(ctx context.Context, id int) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("delete apartment %d: %w", id, ErrNotFound)
-		}
-
 		return fmt.Errorf("delete apartment %d: %w", id, err)
 	}
 

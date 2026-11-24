@@ -3,133 +3,196 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 
-	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ozaitsev92/bms/internal/adapter/postgres"
 	"github.com/ozaitsev92/bms/internal/domain"
+	"github.com/ozaitsev92/bms/internal/port"
 )
 
-func TestBuildingRepository_CRUD(t *testing.T) {
-	ctx := context.Background()
-	repo, _ := setupPostgresDB(t)
+func TestBuildingRepository_Upsert_InsertThenUpdateByName(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
 
-	b, err := repo.Upsert(ctx, domain.Building{
-		Name:    "Tower A",
-		Address: "123 Main St",
-	})
+	b1, created, err := repo.Upsert(t.Context(), domain.Building{Name: "Tower A", Address: "1 St"})
 	require.NoError(t, err)
-	assert.NotZero(t, b.ID)
-	assert.Equal(t, "Tower A", b.Name)
-	assert.Equal(t, "123 Main St", b.Address)
+	assert.True(t, created)
+	assert.NotZero(t, b1.ID)
+	assert.False(t, b1.CreatedAt.IsZero())
 
-	found, err := repo.FindByID(ctx, b.ID, false)
+	b2, created, err := repo.Upsert(t.Context(), domain.Building{Name: "Tower A", Address: "2 St"})
 	require.NoError(t, err)
-	assert.Equal(t, b.ID, found.ID)
-	assert.Equal(t, b.Name, found.Name)
-	assert.Equal(t, b.Address, found.Address)
+	assert.False(t, created, "existing name must be reported as an update")
+	assert.Equal(t, b1.ID, b2.ID)
+	assert.Equal(t, "2 St", b2.Address)
+	assert.Equal(t, b1.CreatedAt, b2.CreatedAt)
+	assert.False(t, b2.UpdatedAt.Before(b1.UpdatedAt))
+}
 
-	updated, err := repo.Upsert(ctx, domain.Building{
-		ID:      b.ID,
-		Name:    "Tower A Updated",
-		Address: "456 New Ave",
-	})
+func TestBuildingRepository_Upsert_UpdateByID(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
+	b := mustCreateBuilding(t, repo, "Old")
+
+	updated, created, err := repo.Upsert(t.Context(), domain.Building{ID: b.ID, Name: "New", Address: "9 St"})
 	require.NoError(t, err)
+	assert.False(t, created)
 	assert.Equal(t, b.ID, updated.ID)
-	assert.Equal(t, "Tower A Updated", updated.Name)
+	assert.Equal(t, "New", updated.Name)
 
-	err = repo.Delete(ctx, b.ID)
+	found, err := repo.FindByID(t.Context(), b.ID, false)
 	require.NoError(t, err)
-
-	_, err = repo.FindByID(ctx, b.ID, false)
-	assert.ErrorIs(t, err, sql.ErrNoRows)
+	assert.Equal(t, "New", found.Name)
+	assert.Equal(t, "9 St", found.Address)
 }
 
-func TestBuildingRepository_FindAll(t *testing.T) {
-	ctx := context.Background()
-	repo, _ := setupPostgresDB(t)
+// Regression test: an unknown explicit ID used to be inserted verbatim, which
+// left the SERIAL sequence behind and made later creates fail.
+func TestBuildingRepository_Upsert_UnknownID_ReturnsNotFoundAndKeepsSequence(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
 
-	for _, b := range []domain.Building{
-		{Name: "Tower A", Address: "123 Main St"},
-		{Name: "Tower B", Address: "456 Side Ave"},
-	} {
-		_, err := repo.Upsert(ctx, b)
-		require.NoError(t, err)
+	_, _, err := repo.Upsert(t.Context(), domain.Building{ID: 3, Name: "Ghost", Address: "x"})
+	require.ErrorIs(t, err, domain.ErrNotFound)
+
+	for i := 1; i <= 5; i++ {
+		b := mustCreateBuilding(t, repo, fmt.Sprintf("B%d", i))
+		assert.Equal(t, i, b.ID)
 	}
-
-	buildings, err := repo.FindAll(ctx, false)
-	require.NoError(t, err)
-	assert.Len(t, buildings, 2)
 }
 
-func TestBuildingRepository_FindAll_WithApartments(t *testing.T) {
-	ctx := context.Background()
-	buildingRepo, db := setupPostgresDB(t)
-	apartmentRepo := postgres.NewApartmentRepo(db)
+func TestBuildingRepository_Upsert_RenameToTakenName_ReturnsConflict(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
+	mustCreateBuilding(t, repo, "Taken")
+	other := mustCreateBuilding(t, repo, "Other")
 
-	b, err := buildingRepo.Upsert(ctx, domain.Building{
-		Name:    "Tower C",
-		Address: "789 Cross Rd",
-	})
-	require.NoError(t, err)
-
-	_, err = apartmentRepo.Upsert(ctx, domain.Apartment{
-		BuildingID: b.ID,
-		Number:     "101",
-		Floor:      1,
-		SqMeters:   50,
-	})
-	require.NoError(t, err)
-
-	buildings, err := buildingRepo.FindAll(ctx, true)
-	require.NoError(t, err)
-	require.Len(t, buildings, 1)
-	assert.Len(t, buildings[0].Apartments, 1)
-	assert.Equal(t, "101", buildings[0].Apartments[0].Number)
+	_, _, err := repo.Upsert(t.Context(), domain.Building{ID: other.ID, Name: "Taken", Address: "x"})
+	require.ErrorIs(t, err, domain.ErrConflict)
 }
 
 func TestBuildingRepository_FindByID_NotFound(t *testing.T) {
-	ctx := context.Background()
-	repo, _ := setupPostgresDB(t)
+	repo := postgres.NewBuildingRepo(freshDB(t))
 
-	_, err := repo.FindByID(ctx, 99999, false)
-	assert.ErrorIs(t, err, sql.ErrNoRows)
+	_, err := repo.FindByID(t.Context(), 999, true)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	assert.NotErrorIs(t, err, sql.ErrNoRows, "driver errors must not leak through the port")
 }
 
-func TestBuildingRepository_Delete_NotFound(t *testing.T) {
-	ctx := context.Background()
-	repo, _ := setupPostgresDB(t)
+func TestBuildingRepository_FindByID_WithApartments(t *testing.T) {
+	db := freshDB(t)
+	repo := postgres.NewBuildingRepo(db)
+	aptRepo := postgres.NewApartmentRepo(db)
+	empty := mustCreateBuilding(t, repo, "Empty")
+	full := mustCreateBuilding(t, repo, "Full")
+	mustCreateApartment(t, aptRepo, full.ID, "2")
+	mustCreateApartment(t, aptRepo, full.ID, "1")
 
-	err := repo.Delete(ctx, 99999)
-	assert.ErrorIs(t, err, sql.ErrNoRows)
+	got, err := repo.FindByID(t.Context(), empty.ID, true)
+	require.NoError(t, err)
+	assert.NotNil(t, got.Apartments, "loaded-but-empty must be an empty slice, not nil")
+	assert.Empty(t, got.Apartments)
+
+	got, err = repo.FindByID(t.Context(), full.ID, true)
+	require.NoError(t, err)
+	require.Len(t, got.Apartments, 2)
+	assert.Less(t, got.Apartments[0].ID, got.Apartments[1].ID, "apartments ordered by id")
+
+	got, err = repo.FindByID(t.Context(), full.ID, false)
+	require.NoError(t, err)
+	assert.Nil(t, got.Apartments)
 }
 
-func TestBuildingRepository_UniqueNameUpsert(t *testing.T) {
-	ctx := context.Background()
-	repo, _ := setupPostgresDB(t)
+func TestBuildingRepository_FindAll_PaginationOrdered(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
+	for i := 1; i <= 5; i++ {
+		mustCreateBuilding(t, repo, fmt.Sprintf("B%d", i))
+	}
 
-	b1, err := repo.Upsert(ctx, domain.Building{
-		Name:    "Tower A",
-		Address: "123 Main St",
-	})
+	ids := func(bs []domain.Building) []int {
+		out := make([]int, len(bs))
+		for i, b := range bs {
+			out[i] = b.ID
+		}
+		return out
+	}
+
+	page, err := repo.FindAll(t.Context(), port.ListParams{Limit: 2}, false)
+	require.NoError(t, err)
+	assert.Equal(t, []int{1, 2}, ids(page))
+
+	page, err = repo.FindAll(t.Context(), port.ListParams{Limit: 2, AfterID: 2}, false)
+	require.NoError(t, err)
+	assert.Equal(t, []int{3, 4}, ids(page))
+
+	page, err = repo.FindAll(t.Context(), port.ListParams{Limit: 2, AfterID: 4}, false)
+	require.NoError(t, err)
+	assert.Equal(t, []int{5}, ids(page))
+
+	page, err = repo.FindAll(t.Context(), port.ListParams{}, false)
+	require.NoError(t, err)
+	assert.Len(t, page, 5, "zero limit means no limit at the repository level")
+}
+
+func TestBuildingRepository_FindAll_WithApartments(t *testing.T) {
+	db := freshDB(t)
+	repo := postgres.NewBuildingRepo(db)
+	aptRepo := postgres.NewApartmentRepo(db)
+	b := mustCreateBuilding(t, repo, "With")
+	mustCreateBuilding(t, repo, "Without")
+	mustCreateApartment(t, aptRepo, b.ID, "101")
+
+	all, err := repo.FindAll(t.Context(), port.ListParams{}, true)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	assert.Len(t, all[0].Apartments, 1)
+	assert.NotNil(t, all[1].Apartments)
+	assert.Empty(t, all[1].Apartments)
+}
+
+func TestBuildingRepository_Delete(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
+	b := mustCreateBuilding(t, repo, "Doomed")
+
+	require.NoError(t, repo.Delete(t.Context(), b.ID))
+
+	_, err := repo.FindByID(t.Context(), b.ID, false)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+
+	require.ErrorIs(t, repo.Delete(t.Context(), b.ID), domain.ErrNotFound, "second delete")
+}
+
+func TestBuildingRepository_Delete_CascadesApartments(t *testing.T) {
+	db := freshDB(t)
+	repo := postgres.NewBuildingRepo(db)
+	aptRepo := postgres.NewApartmentRepo(db)
+	b := mustCreateBuilding(t, repo, "Cascade")
+	a := mustCreateApartment(t, aptRepo, b.ID, "1")
+
+	require.NoError(t, repo.Delete(t.Context(), b.ID))
+
+	_, err := aptRepo.FindByID(t.Context(), a.ID)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func TestBuildingRepository_CanceledContext_ReturnsError(t *testing.T) {
+	repo := postgres.NewBuildingRepo(freshDB(t))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := repo.FindAll(ctx, port.ListParams{}, false)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBuildingRepository_WorksInsideTransaction(t *testing.T) {
+	db := freshDB(t)
+	tx, err := db.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 
-	b2, err := repo.Upsert(ctx, domain.Building{
-		Name:    "Tower A",
-		Address: "456 Updated Ave",
-	})
-	require.NoError(t, err)
+	mustCreateBuilding(t, postgres.NewBuildingRepo(tx), "Rolled back")
+	require.NoError(t, tx.Rollback())
 
-	assert.Equal(t, b1.ID, b2.ID)
-	assert.Equal(t, "456 Updated Ave", b2.Address)
-
-	all, err := repo.FindAll(ctx, false)
+	all, err := postgres.NewBuildingRepo(db).FindAll(t.Context(), port.ListParams{}, false)
 	require.NoError(t, err)
-	require.Len(t, all, 1)
-	assert.Equal(t, b1.ID, all[0].ID)
-	assert.Equal(t, "Tower A", all[0].Name)
-	assert.Equal(t, "456 Updated Ave", all[0].Address)
+	assert.Empty(t, all)
 }

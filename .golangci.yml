@@ -1,0 +1,54 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - exhaustive
+    - gocritic
+    - gosec
+    - nilerr
+    - noctx
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unparam
+    - wrapcheck
+  settings:
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - (*github.com/gofiber/fiber/v2.Ctx).
+        - github.com/gofiber/fiber/v2.NewError(
+      ignore-package-globs:
+        - github.com/ozaitsev92/bms/*
+      ignore-interface-regexps:
+        - ^github\.com/ozaitsev92/bms/internal/adapter/httpapi\.
+  exclusions:
+    generated: strict
+    paths:
+      - models/
+    rules:
+      - path: _test\.go
+        linters: [wrapcheck]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ozaitsev92/bms
+  exclusions:
+    paths:
+      - models/

@@ -1,8 +1,6 @@
 package app_test
 
 import (
-	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,159 +8,122 @@ import (
 
 	"github.com/ozaitsev92/bms/internal/app"
 	"github.com/ozaitsev92/bms/internal/domain"
+	"github.com/ozaitsev92/bms/internal/port"
 )
 
-type mockBuildingRepo struct {
-	buildings map[int]domain.Building
-	nextID    int
-}
-
-func newMockBuildingRepo() *mockBuildingRepo {
-	return &mockBuildingRepo{
-		buildings: make(map[int]domain.Building),
-		nextID:    1,
-	}
-}
-
-func (m *mockBuildingRepo) FindAll(_ context.Context, _ bool) ([]domain.Building, error) {
-	out := make([]domain.Building, 0, len(m.buildings))
-	for _, b := range m.buildings {
-		out = append(out, b)
-	}
-	return out, nil
-}
-
-func (m *mockBuildingRepo) FindByID(_ context.Context, id int, _ bool) (*domain.Building, error) {
-	b, ok := m.buildings[id]
-	if !ok {
-		return nil, app.ErrNotFound
-	}
-	return &b, nil
-}
-
-func (m *mockBuildingRepo) Upsert(_ context.Context, b domain.Building) (*domain.Building, error) {
-	if b.ID == 0 {
-		b.ID = m.nextID
-		m.nextID++
-	}
-	m.buildings[b.ID] = b
-	return &b, nil
-}
-
-func (m *mockBuildingRepo) Delete(_ context.Context, id int) error {
-	if _, ok := m.buildings[id]; !ok {
-		return app.ErrNotFound
-	}
-	delete(m.buildings, id)
-	return nil
-}
-
-type mockBuildingRepoNoRowsFind struct {
-	*mockBuildingRepo
-}
-
-func (m *mockBuildingRepoNoRowsFind) FindByID(_ context.Context, _ int, _ bool) (*domain.Building, error) {
-	return nil, sql.ErrNoRows
-}
-
-type mockBuildingRepoNoRowsDelete struct {
-	*mockBuildingRepo
-}
-
-func (m *mockBuildingRepoNoRowsDelete) Delete(_ context.Context, _ int) error {
-	return sql.ErrNoRows
-}
-
 func TestBuildingService_Upsert(t *testing.T) {
-	svc := app.NewBuildingService(newMockBuildingRepo())
+	t.Parallel()
 
-	t.Run("creates valid building", func(t *testing.T) {
-		b, err := svc.Upsert(context.Background(), domain.Building{
-			Name:    "Tower A",
-			Address: "123 Main St",
-		})
-		require.NoError(t, err)
-		assert.NotZero(t, b.ID)
-		assert.Equal(t, "Tower A", b.Name)
-		assert.Equal(t, "123 Main St", b.Address)
-	})
+	tests := []struct {
+		name        string
+		seed        []domain.Building
+		in          domain.Building
+		wantErr     error
+		wantCreated bool
+	}{
+		{name: "creates", in: domain.Building{Name: "A", Address: "1"}, wantCreated: true},
+		{name: "existing name updates", seed: []domain.Building{{Name: "A", Address: "1"}}, in: domain.Building{Name: "A", Address: "2"}},
+		{name: "update by id", seed: []domain.Building{{Name: "A", Address: "1"}}, in: domain.Building{ID: 1, Name: "B", Address: "2"}},
+		{name: "unknown id", in: domain.Building{ID: 9, Name: "A", Address: "1"}, wantErr: domain.ErrNotFound},
+		{
+			name:    "rename to taken name",
+			seed:    []domain.Building{{Name: "A", Address: "1"}, {Name: "B", Address: "1"}},
+			in:      domain.Building{ID: 2, Name: "A", Address: "1"},
+			wantErr: domain.ErrConflict,
+		},
+		{name: "missing name", in: domain.Building{Address: "1"}, wantErr: domain.ErrMissingBuildingName},
+		{name: "whitespace address", in: domain.Building{Name: "A", Address: " "}, wantErr: domain.ErrMissingBuildingAddress},
+	}
 
-	t.Run("rejects missing name", func(t *testing.T) {
-		_, err := svc.Upsert(context.Background(), domain.Building{
-			Address: "123 Main St",
-		})
-		assert.ErrorIs(t, err, app.ErrMissingBuildingName)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := newFakeBuildingRepo()
+			for _, b := range tt.seed {
+				_, _, err := repo.Upsert(t.Context(), b)
+				require.NoError(t, err)
+			}
+			svc := app.NewBuildingService(repo)
 
-	t.Run("rejects missing address", func(t *testing.T) {
-		_, err := svc.Upsert(context.Background(), domain.Building{
-			Name: "Tower A",
+			got, created, err := svc.Upsert(t.Context(), tt.in)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCreated, created)
+			assert.Equal(t, tt.in.Name, got.Name)
+			assert.Equal(t, tt.in.Address, got.Address)
 		})
-		assert.ErrorIs(t, err, app.ErrMissingBuildingAddress)
-	})
+	}
 }
 
-func TestBuildingService_GetAll(t *testing.T) {
-	repo := newMockBuildingRepo()
+func TestBuildingService_Upsert_InvalidInputDoesNotHitRepo(t *testing.T) {
+	t.Parallel()
+	repo := newFakeBuildingRepo()
+	repo.err = errBoom // would surface if the repo were called
 	svc := app.NewBuildingService(repo)
 
-	for _, b := range []domain.Building{
-		{Name: "Tower A", Address: "123 Main St"},
-		{Name: "Tower B", Address: "456 Side Ave"},
-	} {
-		_, err := svc.Upsert(context.Background(), b)
-		require.NoError(t, err)
-	}
-
-	buildings, err := svc.GetAll(context.Background(), false)
-	require.NoError(t, err)
-	assert.Len(t, buildings, 2)
+	_, _, err := svc.Upsert(t.Context(), domain.Building{})
+	require.ErrorIs(t, err, domain.ErrValidation)
+	assert.NotErrorIs(t, err, errBoom)
 }
 
 func TestBuildingService_GetByID(t *testing.T) {
-	repo := newMockBuildingRepo()
+	t.Parallel()
+	repo := newFakeBuildingRepo()
+	_, _, err := repo.Upsert(t.Context(), domain.Building{Name: "A", Address: "1"})
+	require.NoError(t, err)
 	svc := app.NewBuildingService(repo)
 
-	created, err := svc.Upsert(context.Background(), domain.Building{
-		Name: "Tower A", Address: "123 Main St",
-	})
+	got, err := svc.GetByID(t.Context(), 1)
 	require.NoError(t, err)
+	assert.Equal(t, "A", got.Name)
 
-	found, err := svc.GetByID(context.Background(), created.ID)
-	require.NoError(t, err)
-	assert.Equal(t, created.ID, found.ID)
-	assert.Equal(t, "Tower A", found.Name)
+	_, err = svc.GetByID(t.Context(), 2)
+	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
-func TestBuildingService_GetByID_NotFoundFromRepo(t *testing.T) {
-	repo := &mockBuildingRepoNoRowsFind{mockBuildingRepo: newMockBuildingRepo()}
+func TestBuildingService_List(t *testing.T) {
+	t.Parallel()
+	repo := newFakeBuildingRepo()
+	for _, n := range []string{"A", "B", "C"} {
+		_, _, err := repo.Upsert(t.Context(), domain.Building{Name: n, Address: "x"})
+		require.NoError(t, err)
+	}
 	svc := app.NewBuildingService(repo)
 
-	_, err := svc.GetByID(context.Background(), 999)
-	assert.ErrorIs(t, err, app.ErrNotFound)
+	got, err := svc.List(t.Context(), port.ListParams{Limit: 2, AfterID: 1}, false)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, 2, got[0].ID)
+	assert.Equal(t, 3, got[1].ID)
 }
 
 func TestBuildingService_Delete(t *testing.T) {
-	repo := newMockBuildingRepo()
+	t.Parallel()
+	repo := newFakeBuildingRepo()
+	_, _, err := repo.Upsert(t.Context(), domain.Building{Name: "A", Address: "1"})
+	require.NoError(t, err)
 	svc := app.NewBuildingService(repo)
 
-	b, err := svc.Upsert(context.Background(), domain.Building{
-		Name:    "Tower A",
-		Address: "123 Main St",
-	})
-	require.NoError(t, err)
-
-	err = svc.Delete(context.Background(), b.ID)
-	require.NoError(t, err)
-
-	_, err = svc.GetByID(context.Background(), b.ID)
-	assert.Error(t, err)
+	require.NoError(t, svc.Delete(t.Context(), 1))
+	require.ErrorIs(t, svc.Delete(t.Context(), 1), domain.ErrNotFound)
 }
 
-func TestBuildingService_Delete_NotFoundFromRepo(t *testing.T) {
-	repo := &mockBuildingRepoNoRowsDelete{mockBuildingRepo: newMockBuildingRepo()}
+func TestBuildingService_RepoErrorsArePropagated(t *testing.T) {
+	t.Parallel()
+	repo := newFakeBuildingRepo()
+	repo.err = errBoom
 	svc := app.NewBuildingService(repo)
 
-	err := svc.Delete(context.Background(), 999)
-	assert.ErrorIs(t, err, app.ErrNotFound)
+	_, err := svc.List(t.Context(), port.ListParams{}, true)
+	require.ErrorIs(t, err, errBoom)
+	_, err = svc.GetByID(t.Context(), 1)
+	require.ErrorIs(t, err, errBoom)
+	_, _, err = svc.Upsert(t.Context(), domain.Building{Name: "A", Address: "1"})
+	require.ErrorIs(t, err, errBoom)
+	assert.NotErrorIs(t, err, domain.ErrValidation, "repo failures must not look like validation errors")
+	require.ErrorIs(t, svc.Delete(t.Context(), 1), errBoom)
 }

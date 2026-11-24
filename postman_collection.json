@@ -215,14 +215,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/apartments/building/{{building_id}}",
+              "raw": "{{base_url}}/buildings/{{building_id}}/apartments",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "apartments",
-                "building",
-                "{{building_id}}"
+                "buildings",
+                "{{building_id}}",
+                "apartments"
               ]
             }
           },
@@ -331,6 +331,43 @@
             }
           },
           "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/healthz",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Readiness (pings DB)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/readyz",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "readyz"
+              ]
+            }
+          }
         }
       ]
     }

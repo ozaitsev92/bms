@@ -1,27 +1,36 @@
-FROM golang:1.25-alpine AS builder
+# syntax=docker/dockerfile:1
+FROM golang:1.25.8-alpine3.22 AS builder
 
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ENV CGO_ENABLED=0
 
-WORKDIR /app
+WORKDIR /src
 
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY internal ./internal
 COPY cmd ./cmd
+COPY internal ./internal
 COPY models ./models
 
-RUN go build -o /app/api ./cmd/api
-RUN go build -o /app/migrator ./cmd/migrator
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/migrator ./cmd/migrator
 
-FROM alpine:latest
+FROM alpine:3.22
+
+RUN addgroup -S app && adduser -S -G app -H app
 
 WORKDIR /app
 
-COPY --from=builder /app/api ./api
-COPY --from=builder /app/migrator ./migrator
+COPY --from=builder /out/api /out/migrator ./
 COPY db/migrations ./migrations
 COPY config ./config
+
+ENV CONFIG_PATH=/app/config/local.yaml \
+    MIGRATIONS_PATH=/app/migrations
+
+USER app:app
 
 EXPOSE 8080
 

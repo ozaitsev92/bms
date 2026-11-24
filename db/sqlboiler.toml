@@ -1,3 +1,9 @@
+output            = "models"
+pkgname           = "models"
+wipe              = true
+no-tests          = true
+struct-tag-casing = "snake"
+
 [psql]
   dbname    = "bms"
   host      = "localhost"
@@ -6,13 +12,3 @@
   pass      = "postgres"
   sslmode   = "disable"
   blacklist = ["schema_migrations"]
-
-[generation]
-  output               = "models"
-  pkgname              = "models"
-  add-global-variants  = false
-  add-panic-variants   = false
-  no-tests             = false
-  wipe                 = true
-  struct-tag-casing    = "snake"
-  tag-ignore           = []

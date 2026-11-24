@@ -23,11 +23,13 @@ import (
 
 // Apartment is an object representing the database table.
 type Apartment struct {
-	ID         int    `boil:"id" json:"id" toml:"id" yaml:"id"`
-	BuildingID int    `boil:"building_id" json:"building_id" toml:"building_id" yaml:"building_id"`
-	Number     string `boil:"number" json:"number" toml:"number" yaml:"number"`
-	Floor      int    `boil:"floor" json:"floor" toml:"floor" yaml:"floor"`
-	SQMeters   int    `boil:"sq_meters" json:"sq_meters" toml:"sq_meters" yaml:"sq_meters"`
+	ID         int       `boil:"id" json:"id" toml:"id" yaml:"id"`
+	BuildingID int       `boil:"building_id" json:"building_id" toml:"building_id" yaml:"building_id"`
+	Number     string    `boil:"number" json:"number" toml:"number" yaml:"number"`
+	Floor      int       `boil:"floor" json:"floor" toml:"floor" yaml:"floor"`
+	SQMeters   int       `boil:"sq_meters" json:"sq_meters" toml:"sq_meters" yaml:"sq_meters"`
+	CreatedAt  time.Time `boil:"created_at" json:"created_at" toml:"created_at" yaml:"created_at"`
+	UpdatedAt  time.Time `boil:"updated_at" json:"updated_at" toml:"updated_at" yaml:"updated_at"`
 
 	R *apartmentR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L apartmentL  `boil:"-" json:"-" toml:"-" yaml:"-"`
@@ -39,12 +41,16 @@ var ApartmentColumns = struct {
 	Number     string
 	Floor      string
 	SQMeters   string
+	CreatedAt  string
+	UpdatedAt  string
 }{
 	ID:         "id",
 	BuildingID: "building_id",
 	Number:     "number",
 	Floor:      "floor",
 	SQMeters:   "sq_meters",
+	CreatedAt:  "created_at",
+	UpdatedAt:  "updated_at",
 }
 
 var ApartmentTableColumns = struct {
@@ -53,12 +59,16 @@ var ApartmentTableColumns = struct {
 	Number     string
 	Floor      string
 	SQMeters   string
+	CreatedAt  string
+	UpdatedAt  string
 }{
 	ID:         "apartment.id",
 	BuildingID: "apartment.building_id",
 	Number:     "apartment.number",
 	Floor:      "apartment.floor",
 	SQMeters:   "apartment.sq_meters",
+	CreatedAt:  "apartment.created_at",
+	UpdatedAt:  "apartment.updated_at",
 }
 
 // Generated where
@@ -117,18 +127,43 @@ func (w whereHelperstring) NIN(slice []string) qm.QueryMod {
 	return qm.WhereNotIn(fmt.Sprintf("%s NOT IN ?", w.field), values...)
 }
 
+type whereHelpertime_Time struct{ field string }
+
+func (w whereHelpertime_Time) EQ(x time.Time) qm.QueryMod {
+	return qmhelper.Where(w.field, qmhelper.EQ, x)
+}
+func (w whereHelpertime_Time) NEQ(x time.Time) qm.QueryMod {
+	return qmhelper.Where(w.field, qmhelper.NEQ, x)
+}
+func (w whereHelpertime_Time) LT(x time.Time) qm.QueryMod {
+	return qmhelper.Where(w.field, qmhelper.LT, x)
+}
+func (w whereHelpertime_Time) LTE(x time.Time) qm.QueryMod {
+	return qmhelper.Where(w.field, qmhelper.LTE, x)
+}
+func (w whereHelpertime_Time) GT(x time.Time) qm.QueryMod {
+	return qmhelper.Where(w.field, qmhelper.GT, x)
+}
+func (w whereHelpertime_Time) GTE(x time.Time) qm.QueryMod {
+	return qmhelper.Where(w.field, qmhelper.GTE, x)
+}
+
 var ApartmentWhere = struct {
 	ID         whereHelperint
 	BuildingID whereHelperint
 	Number     whereHelperstring
 	Floor      whereHelperint
 	SQMeters   whereHelperint
+	CreatedAt  whereHelpertime_Time
+	UpdatedAt  whereHelpertime_Time
 }{
 	ID:         whereHelperint{field: "\"apartment\".\"id\""},
 	BuildingID: whereHelperint{field: "\"apartment\".\"building_id\""},
 	Number:     whereHelperstring{field: "\"apartment\".\"number\""},
 	Floor:      whereHelperint{field: "\"apartment\".\"floor\""},
 	SQMeters:   whereHelperint{field: "\"apartment\".\"sq_meters\""},
+	CreatedAt:  whereHelpertime_Time{field: "\"apartment\".\"created_at\""},
+	UpdatedAt:  whereHelpertime_Time{field: "\"apartment\".\"updated_at\""},
 }
 
 // ApartmentRels is where relationship names are stored.
@@ -168,9 +203,9 @@ func (r *apartmentR) GetBuilding() *Building {
 type apartmentL struct{}
 
 var (
-	apartmentAllColumns            = []string{"id", "building_id", "number", "floor", "sq_meters"}
+	apartmentAllColumns            = []string{"id", "building_id", "number", "floor", "sq_meters", "created_at", "updated_at"}
 	apartmentColumnsWithoutDefault = []string{"building_id", "number", "floor", "sq_meters"}
-	apartmentColumnsWithDefault    = []string{"id"}
+	apartmentColumnsWithDefault    = []string{"id", "created_at", "updated_at"}
 	apartmentPrimaryKeyColumns     = []string{"id"}
 	apartmentGeneratedColumns      = []string{}
 )
@@ -707,6 +742,16 @@ func (o *Apartment) Insert(ctx context.Context, exec boil.ContextExecutor, colum
 	}
 
 	var err error
+	if !boil.TimestampsAreSkipped(ctx) {
+		currTime := time.Now().In(boil.GetLocation())
+
+		if o.CreatedAt.IsZero() {
+			o.CreatedAt = currTime
+		}
+		if o.UpdatedAt.IsZero() {
+			o.UpdatedAt = currTime
+		}
+	}
 
 	if err := o.doBeforeInsertHooks(ctx, exec); err != nil {
 		return err
@@ -782,6 +827,12 @@ func (o *Apartment) Insert(ctx context.Context, exec boil.ContextExecutor, colum
 // See boil.Columns.UpdateColumnSet documentation to understand column list inference for updates.
 // Update does not automatically update the record in case of default values. Use .Reload() to refresh the records.
 func (o *Apartment) Update(ctx context.Context, exec boil.ContextExecutor, columns boil.Columns) (int64, error) {
+	if !boil.TimestampsAreSkipped(ctx) {
+		currTime := time.Now().In(boil.GetLocation())
+
+		o.UpdatedAt = currTime
+	}
+
 	var err error
 	if err = o.doBeforeUpdateHooks(ctx, exec); err != nil {
 		return 0, err
@@ -911,6 +962,14 @@ func (o ApartmentSlice) UpdateAll(ctx context.Context, exec boil.ContextExecutor
 func (o *Apartment) Upsert(ctx context.Context, exec boil.ContextExecutor, updateOnConflict bool, conflictColumns []string, updateColumns, insertColumns boil.Columns, opts ...UpsertOptionFunc) error {
 	if o == nil {
 		return errors.New("models: no apartment provided for upsert")
+	}
+	if !boil.TimestampsAreSkipped(ctx) {
+		currTime := time.Now().In(boil.GetLocation())
+
+		if o.CreatedAt.IsZero() {
+			o.CreatedAt = currTime
+		}
+		o.UpdatedAt = currTime
 	}
 
 	if err := o.doBeforeUpsertHooks(ctx, exec); err != nil {

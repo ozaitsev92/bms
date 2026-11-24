@@ -1,26 +1,27 @@
+// Package logger builds the application's structured slog logger.
 package logger
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
-	"os"
 )
 
 const (
-	// EnvLocal configures local development logging.
+	// EnvLocal configures human-readable debug logging.
 	EnvLocal = "local"
-	// EnvProd configures production logging.
+	// EnvProd configures JSON logging at info level.
 	EnvProd = "prod"
 )
 
-// Setup builds a logger configured for the given environment.
-func Setup(env string) *slog.Logger {
+// New builds a logger writing to w, configured for the given environment.
+func New(env string, w io.Writer) (*slog.Logger, error) {
 	switch env {
 	case EnvLocal:
-		return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})), nil
 	case EnvProd:
-		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})), nil
 	default:
-		panic(fmt.Sprintf("unknown environment: %s", env))
+		return nil, fmt.Errorf("unknown environment %q (want %q or %q)", env, EnvLocal, EnvProd)
 	}
 }

@@ -1,0 +1,9 @@
+.git
+.github
+bin/
+*.out
+*.test
+*.md
+postman_collection.json
+docker-compose.yml
+.golangci.yml

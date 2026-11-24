@@ -2,12 +2,17 @@ env: "local"
 
 http_server:
   address: ":8080"
-  timeout: 4s
+  request_timeout: 4s
   idle_timeout: 60s
   read_timeout: 10s
   write_timeout: 10s
   graceful_shutdown_timeout: 10s
+  body_limit_bytes: 1048576
 
 postgres:
   dsn: "postgres://postgres:postgres@postgres:5432/bms?sslmode=disable"
   migrations_table: "schema_migrations"
+  migrations_path: "db/migrations"
+  max_open_conns: 25
+  max_idle_conns: 25
+  conn_max_lifetime: 30m

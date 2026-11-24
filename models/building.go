@@ -23,44 +23,58 @@ import (
 
 // Building is an object representing the database table.
 type Building struct {
-	ID      int    `boil:"id" json:"id" toml:"id" yaml:"id"`
-	Name    string `boil:"name" json:"name" toml:"name" yaml:"name"`
-	Address string `boil:"address" json:"address" toml:"address" yaml:"address"`
+	ID        int       `boil:"id" json:"id" toml:"id" yaml:"id"`
+	Name      string    `boil:"name" json:"name" toml:"name" yaml:"name"`
+	Address   string    `boil:"address" json:"address" toml:"address" yaml:"address"`
+	CreatedAt time.Time `boil:"created_at" json:"created_at" toml:"created_at" yaml:"created_at"`
+	UpdatedAt time.Time `boil:"updated_at" json:"updated_at" toml:"updated_at" yaml:"updated_at"`
 
 	R *buildingR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L buildingL  `boil:"-" json:"-" toml:"-" yaml:"-"`
 }
 
 var BuildingColumns = struct {
-	ID      string
-	Name    string
-	Address string
+	ID        string
+	Name      string
+	Address   string
+	CreatedAt string
+	UpdatedAt string
 }{
-	ID:      "id",
-	Name:    "name",
-	Address: "address",
+	ID:        "id",
+	Name:      "name",
+	Address:   "address",
+	CreatedAt: "created_at",
+	UpdatedAt: "updated_at",
 }
 
 var BuildingTableColumns = struct {
-	ID      string
-	Name    string
-	Address string
+	ID        string
+	Name      string
+	Address   string
+	CreatedAt string
+	UpdatedAt string
 }{
-	ID:      "building.id",
-	Name:    "building.name",
-	Address: "building.address",
+	ID:        "building.id",
+	Name:      "building.name",
+	Address:   "building.address",
+	CreatedAt: "building.created_at",
+	UpdatedAt: "building.updated_at",
 }
 
 // Generated where
 
 var BuildingWhere = struct {
-	ID      whereHelperint
-	Name    whereHelperstring
-	Address whereHelperstring
+	ID        whereHelperint
+	Name      whereHelperstring
+	Address   whereHelperstring
+	CreatedAt whereHelpertime_Time
+	UpdatedAt whereHelpertime_Time
 }{
-	ID:      whereHelperint{field: "\"building\".\"id\""},
-	Name:    whereHelperstring{field: "\"building\".\"name\""},
-	Address: whereHelperstring{field: "\"building\".\"address\""},
+	ID:        whereHelperint{field: "\"building\".\"id\""},
+	Name:      whereHelperstring{field: "\"building\".\"name\""},
+	Address:   whereHelperstring{field: "\"building\".\"address\""},
+	CreatedAt: whereHelpertime_Time{field: "\"building\".\"created_at\""},
+	UpdatedAt: whereHelpertime_Time{field: "\"building\".\"updated_at\""},
 }
 
 // BuildingRels is where relationship names are stored.
@@ -100,9 +114,9 @@ func (r *buildingR) GetApartments() ApartmentSlice {
 type buildingL struct{}
 
 var (
-	buildingAllColumns            = []string{"id", "name", "address"}
+	buildingAllColumns            = []string{"id", "name", "address", "created_at", "updated_at"}
 	buildingColumnsWithoutDefault = []string{"name", "address"}
-	buildingColumnsWithDefault    = []string{"id"}
+	buildingColumnsWithDefault    = []string{"id", "created_at", "updated_at"}
 	buildingPrimaryKeyColumns     = []string{"id"}
 	buildingGeneratedColumns      = []string{}
 )
@@ -641,6 +655,16 @@ func (o *Building) Insert(ctx context.Context, exec boil.ContextExecutor, column
 	}
 
 	var err error
+	if !boil.TimestampsAreSkipped(ctx) {
+		currTime := time.Now().In(boil.GetLocation())
+
+		if o.CreatedAt.IsZero() {
+			o.CreatedAt = currTime
+		}
+		if o.UpdatedAt.IsZero() {
+			o.UpdatedAt = currTime
+		}
+	}
 
 	if err := o.doBeforeInsertHooks(ctx, exec); err != nil {
 		return err
@@ -716,6 +740,12 @@ func (o *Building) Insert(ctx context.Context, exec boil.ContextExecutor, column
 // See boil.Columns.UpdateColumnSet documentation to understand column list inference for updates.
 // Update does not automatically update the record in case of default values. Use .Reload() to refresh the records.
 func (o *Building) Update(ctx context.Context, exec boil.ContextExecutor, columns boil.Columns) (int64, error) {
+	if !boil.TimestampsAreSkipped(ctx) {
+		currTime := time.Now().In(boil.GetLocation())
+
+		o.UpdatedAt = currTime
+	}
+
 	var err error
 	if err = o.doBeforeUpdateHooks(ctx, exec); err != nil {
 		return 0, err
@@ -845,6 +875,14 @@ func (o BuildingSlice) UpdateAll(ctx context.Context, exec boil.ContextExecutor,
 func (o *Building) Upsert(ctx context.Context, exec boil.ContextExecutor, updateOnConflict bool, conflictColumns []string, updateColumns, insertColumns boil.Columns, opts ...UpsertOptionFunc) error {
 	if o == nil {
 		return errors.New("models: no building provided for upsert")
+	}
+	if !boil.TimestampsAreSkipped(ctx) {
+		currTime := time.Now().In(boil.GetLocation())
+
+		if o.CreatedAt.IsZero() {
+			o.CreatedAt = currTime
+		}
+		o.UpdatedAt = currTime
 	}
 
 	if err := o.doBeforeUpsertHooks(ctx, exec); err != nil {

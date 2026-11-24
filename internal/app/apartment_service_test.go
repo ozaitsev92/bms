@@ -1,8 +1,6 @@
 package app_test
 
 import (
-	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,186 +8,146 @@ import (
 
 	"github.com/ozaitsev92/bms/internal/app"
 	"github.com/ozaitsev92/bms/internal/domain"
+	"github.com/ozaitsev92/bms/internal/port"
 )
 
-type mockApartmentRepo struct {
-	apartments map[int]domain.Apartment
-	nextID     int
-}
-
-func newMockApartmentRepo() *mockApartmentRepo {
-	return &mockApartmentRepo{
-		apartments: make(map[int]domain.Apartment),
-		nextID:     1,
-	}
-}
-
-func (m *mockApartmentRepo) FindAll(_ context.Context) ([]domain.Apartment, error) {
-	out := make([]domain.Apartment, 0, len(m.apartments))
-	for _, a := range m.apartments {
-		out = append(out, a)
-	}
-	return out, nil
-}
-
-func (m *mockApartmentRepo) FindByID(_ context.Context, id int) (*domain.Apartment, error) {
-	a, ok := m.apartments[id]
-	if !ok {
-		return nil, app.ErrNotFound
-	}
-	return &a, nil
-}
-
-func (m *mockApartmentRepo) FindByBuildingID(_ context.Context, buildingID int) ([]domain.Apartment, error) {
-	var out []domain.Apartment
-	for _, a := range m.apartments {
-		if a.BuildingID == buildingID {
-			out = append(out, a)
-		}
-	}
-	return out, nil
-}
-
-func (m *mockApartmentRepo) Upsert(_ context.Context, a domain.Apartment) (*domain.Apartment, error) {
-	if a.ID == 0 {
-		a.ID = m.nextID
-		m.nextID++
-	}
-	m.apartments[a.ID] = a
-	return &a, nil
-}
-
-func (m *mockApartmentRepo) Delete(_ context.Context, id int) error {
-	if _, ok := m.apartments[id]; !ok {
-		return app.ErrNotFound
-	}
-	delete(m.apartments, id)
-	return nil
-}
-
-type mockApartmentRepoNoRowsFind struct {
-	*mockApartmentRepo
-}
-
-func (m *mockApartmentRepoNoRowsFind) FindByID(_ context.Context, _ int) (*domain.Apartment, error) {
-	return nil, sql.ErrNoRows
-}
-
-type mockApartmentRepoNoRowsDelete struct {
-	*mockApartmentRepo
-}
-
-func (m *mockApartmentRepoNoRowsDelete) Delete(_ context.Context, _ int) error {
-	return sql.ErrNoRows
+func apt(buildingID int, number string) domain.Apartment {
+	return domain.Apartment{BuildingID: buildingID, Number: number, Floor: 1, SqMeters: 50}
 }
 
 func TestApartmentService_Upsert(t *testing.T) {
-	svc := app.NewApartmentService(newMockApartmentRepo())
+	t.Parallel()
 
-	t.Run("creates valid apartment", func(t *testing.T) {
-		a, err := svc.Upsert(context.Background(), domain.Apartment{
-			BuildingID: 1,
-			Number:     "42A",
-			Floor:      3,
-			SqMeters:   65,
-		})
-		require.NoError(t, err)
-		assert.NotZero(t, a.ID)
-	})
-
-	t.Run("rejects missing building_id", func(t *testing.T) {
-		_, err := svc.Upsert(context.Background(), domain.Apartment{
-			Number: "1A", Floor: 1, SqMeters: 40,
-		})
-		assert.ErrorIs(t, err, app.ErrMissingBuildingID)
-	})
-
-	t.Run("rejects missing number", func(t *testing.T) {
-		_, err := svc.Upsert(context.Background(), domain.Apartment{
-			BuildingID: 1, Floor: 1, SqMeters: 40,
-		})
-		assert.ErrorIs(t, err, app.ErrMissingApartmentNumber)
-	})
-
-	t.Run("rejects invalid floor", func(t *testing.T) {
-		_, err := svc.Upsert(context.Background(), domain.Apartment{
-			BuildingID: 1, Number: "1A", Floor: 0, SqMeters: 40,
-		})
-		assert.ErrorIs(t, err, app.ErrInvalidFloor)
-	})
-
-	t.Run("rejects invalid sq_meters", func(t *testing.T) {
-		_, err := svc.Upsert(context.Background(), domain.Apartment{
-			BuildingID: 1, Number: "1A", Floor: 1, SqMeters: 0,
-		})
-		assert.ErrorIs(t, err, app.ErrInvalidSqMeters)
-	})
-}
-
-func TestApartmentService_GetByBuildingID(t *testing.T) {
-	repo := newMockApartmentRepo()
-	svc := app.NewApartmentService(repo)
-
-	for _, a := range []domain.Apartment{
-		{BuildingID: 1, Number: "1A", Floor: 1, SqMeters: 50},
-		{BuildingID: 1, Number: "1B", Floor: 1, SqMeters: 55},
-		{BuildingID: 2, Number: "2A", Floor: 2, SqMeters: 70},
-	} {
-		_, err := svc.Upsert(context.Background(), a)
-		require.NoError(t, err)
+	tests := []struct {
+		name        string
+		seed        []domain.Apartment
+		in          domain.Apartment
+		wantErr     []error
+		wantCreated bool
+	}{
+		{name: "creates", in: apt(1, "101"), wantCreated: true},
+		{name: "ground floor", in: domain.Apartment{BuildingID: 1, Number: "G", Floor: 0, SqMeters: 30}, wantCreated: true},
+		{name: "existing number updates", seed: []domain.Apartment{apt(1, "101")}, in: apt(1, "101")},
+		{name: "unknown id", in: domain.Apartment{ID: 9, BuildingID: 1, Number: "1", SqMeters: 1}, wantErr: []error{domain.ErrNotFound}},
+		{name: "unknown building", in: apt(99, "1"), wantErr: []error{domain.ErrInvalidReference}},
+		{
+			name:    "number taken via update",
+			seed:    []domain.Apartment{apt(1, "1"), apt(1, "2")},
+			in:      domain.Apartment{ID: 2, BuildingID: 1, Number: "1", SqMeters: 1},
+			wantErr: []error{domain.ErrConflict},
+		},
+		{name: "negative sq meters", in: domain.Apartment{BuildingID: 1, Number: "1", SqMeters: -1}, wantErr: []error{domain.ErrInvalidSqMeters}},
+		{
+			name:    "reports every violation",
+			in:      domain.Apartment{},
+			wantErr: []error{domain.ErrMissingBuildingID, domain.ErrMissingApartmentNumber, domain.ErrInvalidSqMeters},
+		},
 	}
 
-	apts, err := svc.GetByBuildingID(context.Background(), 1)
-	require.NoError(t, err)
-	assert.Len(t, apts, 2)
-	for _, a := range apts {
-		assert.Equal(t, 1, a.BuildingID)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := newFakeApartmentRepo(1)
+			for _, a := range tt.seed {
+				_, _, err := repo.Upsert(t.Context(), a)
+				require.NoError(t, err)
+			}
+			svc := app.NewApartmentService(repo)
+
+			got, created, err := svc.Upsert(t.Context(), tt.in)
+			if len(tt.wantErr) > 0 {
+				for _, want := range tt.wantErr {
+					require.ErrorIs(t, err, want)
+				}
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCreated, created)
+			assert.Equal(t, tt.in.Floor, got.Floor)
+		})
 	}
 }
 
 func TestApartmentService_GetByID(t *testing.T) {
-	repo := newMockApartmentRepo()
+	t.Parallel()
+	repo := newFakeApartmentRepo(1)
+	_, _, err := repo.Upsert(t.Context(), apt(1, "1"))
+	require.NoError(t, err)
 	svc := app.NewApartmentService(repo)
 
-	created, err := svc.Upsert(context.Background(), domain.Apartment{
-		BuildingID: 1, Number: "1A", Floor: 1, SqMeters: 50,
-	})
+	got, err := svc.GetByID(t.Context(), 1)
 	require.NoError(t, err)
+	assert.Equal(t, "1", got.Number)
 
-	found, err := svc.GetByID(context.Background(), created.ID)
-	require.NoError(t, err)
-	assert.Equal(t, created.ID, found.ID)
-	assert.Equal(t, "1A", found.Number)
+	_, err = svc.GetByID(t.Context(), 2)
+	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
-func TestApartmentService_GetByID_NotFoundFromRepo(t *testing.T) {
-	repo := &mockApartmentRepoNoRowsFind{mockApartmentRepo: newMockApartmentRepo()}
+func TestApartmentService_List(t *testing.T) {
+	t.Parallel()
+	repo := newFakeApartmentRepo(1, 2)
+	for _, a := range []domain.Apartment{apt(1, "1"), apt(2, "1"), apt(1, "2")} {
+		_, _, err := repo.Upsert(t.Context(), a)
+		require.NoError(t, err)
+	}
 	svc := app.NewApartmentService(repo)
 
-	_, err := svc.GetByID(context.Background(), 999)
-	assert.ErrorIs(t, err, app.ErrNotFound)
+	all, err := svc.List(t.Context(), port.ListParams{})
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+
+	page, err := svc.List(t.Context(), port.ListParams{Limit: 1, AfterID: 1})
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	assert.Equal(t, 2, page[0].ID)
+}
+
+func TestApartmentService_ListByBuilding(t *testing.T) {
+	t.Parallel()
+	repo := newFakeApartmentRepo(1, 2, 3)
+	for _, a := range []domain.Apartment{apt(1, "1"), apt(2, "1"), apt(1, "2")} {
+		_, _, err := repo.Upsert(t.Context(), a)
+		require.NoError(t, err)
+	}
+	svc := app.NewApartmentService(repo)
+
+	got, err := svc.ListByBuilding(t.Context(), 1, port.ListParams{})
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+
+	got, err = svc.ListByBuilding(t.Context(), 3, port.ListParams{})
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	_, err = svc.ListByBuilding(t.Context(), 99, port.ListParams{})
+	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
 func TestApartmentService_Delete(t *testing.T) {
-	repo := newMockApartmentRepo()
+	t.Parallel()
+	repo := newFakeApartmentRepo(1)
+	_, _, err := repo.Upsert(t.Context(), apt(1, "1"))
+	require.NoError(t, err)
 	svc := app.NewApartmentService(repo)
 
-	a, err := svc.Upsert(context.Background(), domain.Apartment{
-		BuildingID: 1, Number: "1A", Floor: 1, SqMeters: 50,
-	})
-	require.NoError(t, err)
-
-	err = svc.Delete(context.Background(), a.ID)
-	require.NoError(t, err)
-
-	_, err = svc.GetByID(context.Background(), a.ID)
-	assert.Error(t, err)
+	require.NoError(t, svc.Delete(t.Context(), 1))
+	require.ErrorIs(t, svc.Delete(t.Context(), 1), domain.ErrNotFound)
 }
 
-func TestApartmentService_Delete_NotFoundFromRepo(t *testing.T) {
-	repo := &mockApartmentRepoNoRowsDelete{mockApartmentRepo: newMockApartmentRepo()}
+func TestApartmentService_RepoErrorsArePropagated(t *testing.T) {
+	t.Parallel()
+	repo := newFakeApartmentRepo(1)
+	repo.err = errBoom
 	svc := app.NewApartmentService(repo)
 
-	err := svc.Delete(context.Background(), 999)
-	assert.ErrorIs(t, err, app.ErrNotFound)
+	_, err := svc.List(t.Context(), port.ListParams{})
+	require.ErrorIs(t, err, errBoom)
+	_, err = svc.GetByID(t.Context(), 1)
+	require.ErrorIs(t, err, errBoom)
+	_, err = svc.ListByBuilding(t.Context(), 1, port.ListParams{})
+	require.ErrorIs(t, err, errBoom)
+	_, _, err = svc.Upsert(t.Context(), apt(1, "1"))
+	require.ErrorIs(t, err, errBoom)
+	require.ErrorIs(t, svc.Delete(t.Context(), 1), errBoom)
 }
