@@ -1,3 +1,5 @@
+![Go CI](https://img.shields.io/github/actions/workflow/status/ozaitsev92/bms/ci.yaml?branch=main&label=go)
+
 # Building Management System API
 
 REST API for managing buildings and apartments.
@@ -6,7 +8,7 @@ REST API for managing buildings and apartments.
 
 - Go 1.27
 - Fiber (HTTP)
-- SQLBoiler (ORM, generated models in `models/`)
+- SQLBoiler (ORM)
 - PostgreSQL 19
 - golang-migrate (schema migrations)
 - Testcontainers (repository integration tests)
@@ -60,8 +62,6 @@ Base URL: http://localhost:8080
 | with `id` of an existing row | updates it | `200` |
 | with `id` that does not exist | nothing is written | `404` |
 
-Clients can never choose primary keys: an `id` is only used to find an existing row.
-
 ### Pagination
 List endpoints use keyset pagination ordered by `id`: `?limit=` (1–200, default 50) and `?after_id=` (the last `id` of the previous page). The response is a JSON array.
 
@@ -102,7 +102,7 @@ Create/Upsert apartment:
 
 Prerequisites: Docker (with Compose v2), Go 1.27+
 
-Start the full stack (Postgres, then migrator, then API):
+Start the full stack:
 ```bash
 make run
 ```
@@ -123,8 +123,6 @@ The YAML file is passed with `--config` or `CONFIG_PATH` (see `config/local.yaml
 | `POSTGRES_DSN` | `postgres.dsn` |
 | `MIGRATIONS_PATH` | `postgres.migrations_path` |
 
-The configuration is validated at startup and the process exits with a clear error if anything is invalid. HTTP read/write/idle timeouts, a per-request deadline (`request_timeout`), the body limit, the DB pool size and the graceful-shutdown timeout are all applied from it.
-
 ## Migrations and Models
 
 Run migrations from the host against the compose database (after `make run`):
@@ -132,10 +130,10 @@ Run migrations from the host against the compose database (after `make run`):
 make migrate           # apply all pending
 make migrate-down      # roll back one step
 make migrate-version   # print current version
+# migrator also supports: force N (clear a dirty state)
 ```
-The migrator binary also accepts `force N` to clear a dirty state after a failed migration has been repaired by hand.
 
-Regenerate SQLBoiler models (pinned sqlboiler version, installed into `./bin`; needs a migrated database on `localhost:5432`):
+Regenerate SQLBoiler models (needs a migrated database on `localhost:5432`):
 ```bash
 make generate
 ```
@@ -150,20 +148,13 @@ make lint        # golangci-lint (config in .golangci.yml)
 make vuln        # govulncheck
 ```
 
-The repository tests in `internal/adapter/postgres` start one Postgres 19 container per test run (Testcontainers). They apply the real migrations through golang-migrate and truncate the tables before each test. They are skipped with `-short`.
-
 ## Postman
 
-This repository includes a ready-to-import Postman collection:
-
-- postman_collection.json
-
-How to use:
-1. Import postman_collection.json into Postman.
-2. Set base_url (default: http://localhost:8080).
-3. Run "Upsert Building (Create)" first to populate building_id.
-4. Run "Upsert Apartment (Create)" to populate apartment_id.
-5. Use the remaining requests for get/list/update/delete flows.
+Import `postman_collection.json` into Postman, then:
+1. Set base_url (default: http://localhost:8080).
+2. Run "Upsert Building (Create)" first to populate building_id.
+3. Run "Upsert Apartment (Create)" to populate apartment_id.
+4. Use the remaining requests for get/list/update/delete flows.
 
 ## Project Structure
 
@@ -190,6 +181,5 @@ models/           # SQLBoiler generated models (do not edit)
 
 - **Hexagonal layering.** `domain` imports nothing. `port` declares the repository interfaces *and* their error contract (`domain.ErrNotFound`, `ErrConflict`, `ErrInvalidReference`). Adapters translate driver errors at the boundary, so `app` never sees `database/sql`.
 - **One error-to-status mapping.** Handlers return errors and `httpapi.ErrorHandler` maps them. 5xx causes are logged with the request id; clients get stable messages.
-- **Upsert by natural key** is kept because the API contract requires it. The insert-vs-update outcome comes from Postgres (`RETURNING (xmax = 0)`), and updates by id never insert.
-- **Hand-written SQL for upserts.** sqlboiler is used for reads and deletes; the two upserts are explicit parameterised statements, because sqlboiler cannot report whether a row was inserted.
+- **Upsert by natural key** is kept because the API contract requires it. Upserts are hand-written SQL (sqlboiler can't report insert vs update) using `RETURNING (xmax = 0)`, and updates by id never insert.
 - **No authentication** is configured. That is out of scope for this exercise.
